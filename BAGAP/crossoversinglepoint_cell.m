@@ -74,7 +74,7 @@ for i=1:nKids
     else
         % make one child
         %xoverKids(i,:) = [ parent1(1:xOverPoint),parent2(( xOverPoint + 1 ):  end )  ];
-        xoverKids{i} = [ parent1(1:xOverPoint),parent2(( xOverPoint + 1 ):  end )  ];
+        xoverKids{i} = [ parent1(1:xOverPoint);parent2(( xOverPoint + 1 ):  end )  ];
     end
 
     % Here I have to avoid duplicates in current child.

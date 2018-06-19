@@ -1,4 +1,4 @@
-function scores = ga_pcr_fitness(x, perf, O, T)
+function [scores,Ote,Otes] = ga_pcr_fitness(x, perf, O, T)
 % function scores = ga_pcr_fitness(x, perf, O, T)
 % 
 % |-------------------------|
@@ -8,7 +8,7 @@ function scores = ga_pcr_fitness(x, perf, O, T)
 % DESCRIPTION:
 %  This function is a fitness function to be used with the genetic algorithm toolbox.
 %  The 'x' input is used to select how many and which NN components should be used
-%  to conform ensemble output aggregated by PCR with target data.
+%  to conform the ensemble output aggregated by PCR with target data.
 %  It is assumed that training was performed using Tr to calibrate weights and biases,
 %  Va as a method of early stopping criterion and Te as the real world signals
 %  evaluating the performance.
@@ -32,7 +32,7 @@ function scores = ga_pcr_fitness(x, perf, O, T)
 % STEPS:
 %  1.\ select which metrics to use;
 %  2.\ use 'x' to select NN components (how many and which);
-%  3.\ compute ensemble response aggregating results by PCR;
+%  3.\ compute ensemble response aggregating results by PCR:
 %       a. cross-validation weights on Tr       [PCRcv.m]
 %       b. BAGAP response           on Te       [bagnet.m]
 %       c. select N eigenvectors    on Te       [MSEg.m]
@@ -47,12 +47,7 @@ function scores = ga_pcr_fitness(x, perf, O, T)
 %  combination of the splitting of each trained NN component, don't worry because you can use the entire
 %  Tr subset from which you splitted Tr and Te.
 
-%% load data
-%eval(['load ' mat_file]) 
-ttr = T.ttr;
-tva = T.tva;
-tte = T.tte;
-%% 1.\ metric selection
+%% 1.\ metric selection | modify as required
 perf_Fnc = {'mse', 'rmse', 'mae', 'mbe2', 'r', 'smape', 'eff', 'D'};
 %-------------------------------------------
 if nargin > 1
@@ -60,13 +55,18 @@ if nargin > 1
 else
     curr_perf = 2;
 end
-%-------------------------------------------
-
 %% 2.\ select the response of 'x' NNs
 scores = zeros(size(x,1),1);
 ttr = T.ttr;
 tva = T.tva;
 tte = T.tte;
+ttes = T.ttes;
+if nargout >1
+    Ote = NaN( size(tte,1), size(x,1) );
+end
+if nargout >2
+    Otes = NaN( size(ttes,1), size(x,1) );
+end
 for jj = 1:size(x,1)
 	% select genome of current individual from population:
 	genome = x{jj};
@@ -74,6 +74,7 @@ for jj = 1:size(x,1)
 	otr = O.otr(:,genome);
 	ova = O.ova(:,genome);
 	ote = O.ote(:,genome);
+    otes= O.otes(:,genome);
 %% 3.\ compute ensemble response
 	% %  IMPLEMENTED PROCEDURE
 	%  a.\ cross-validation weights on Tr [PCRcv]
@@ -86,10 +87,27 @@ for jj = 1:size(x,1)
 	Yb_te 			= bagnet(ote,w(:,w_min_va)); 
 	%  e.\ performance evaluation on Te
 	Ind 			= perfind(Yb_te, tte);
-
 %% 4.\ assign selected metric to scores
 	scores(jj) 		= Ind.(perf_Fnc{curr_perf});
-end
+%% 5.\ Output Te, after BAGAP simulation, to evaluate results
+    if nargout >1
+        Ote(:,jj)   = Yb_te;
+    end
 
+    % This point is extremely important! In fact, the selection of the
+    % number of principal components is performed on the Validation subset
+    % (and this is not the point) and the GA optimization is based on the
+    % performance of the BAGAP ensemble on the Testing subset.
+    % In order to ensure that the final evaluation is carried out on an
+    % independent Testing subset, a "tes" subset is built in
+    % sensitivity_GA.m and it used here for the final evaluation.
+    if nargout >2
+	%  d.\ create BAGAP response on Te
+        Yb_tes		= bagnet(otes,w(:,w_min_va)); 
+	%  e.\ performance evaluation on Te
+        Ind 		= perfind(Yb_tes, ttes);
+        Otes(:,jj)  = Yb_tes;
+    end    
+end
 %% return
 end

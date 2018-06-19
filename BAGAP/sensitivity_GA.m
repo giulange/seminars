@@ -1,9 +1,8 @@
-function sensitivity_GA(WDIR,name,save_ga_fil,useSorting,nBoots,nvars,popsize,maxgen,mutationRate,CrossFract,FitnessPerf)
-%% P A R s
-% WDIR                = '~/git/seminars/BAGAP';
-% name                = 'ann1kh2_al05fe_3D__cl_o_r__corr.mat';
-% save_ga_fil         = 'save_GA_conditions.mat';
+function sensitivity_GA(WDIR,selBAGAP,save_ga_fil,useSorting,nBoots,nvars,popsize,maxgen,mutationRate,CrossFract,FitnessPerf)
+% sensitivity_GA(WDIR,selBAGAP,save_ga_fil,useSorting,nBoots,nvars,popsize,maxgen,mutationRate,CrossFract,FitnessPerf)
 % 
+
+%% P A R s 
 % useSorting          = true;
 % nBoots              = 1000;
 % nvars               = 20;  % 25 / 50 / 75 / 100 % == GenomeLength
@@ -15,20 +14,11 @@ function sensitivity_GA(WDIR,name,save_ga_fil,useSorting,nBoots,nvars,popsize,ma
 % 
 % % migrint           = 5;   % migration interval [generations] | USELESS !!
 
+fncTolle            = 1e-6;
 %% L O A D
-cd( WDIR )
-load( fullfile(WDIR,name) )
-
-%load( fullfile(WDIR,'ann1kh2_al05fe_3D__cl_o_r__corr__SMALL.mat') )
-%load( fullfile(WDIR,'data4models.mat'), 'DATA2' )
+load( selBAGAP )
 %% -- prepare
-sclorpt         = name( strfind(name,'__')+2 : strfind(name,'.')-1 );
-annResamples    = numel(iPerf_tr);
-[R,Q]           = size(x_in);
-Ntr             = size(y_sim_tr,2);
-Nva             = size(y_sim_va,2);
-Nte             = size(y_sim_te,2);
-Ntot            = Ntr + Nva + Nte;
+sclorpt         = selBAGAP( strfind(selBAGAP,'__')+2 : strfind(selBAGAP,'.')-1 ); %#ok<NASGU>
 %% S O R T  | by Tr performance [rmse]
 if useSorting
     [~,iTr] = sort([iPerf_tr.rmse],2,'descend');
@@ -43,25 +33,35 @@ else
 end
 %% DATA EXTRACTION | applying rmse sorting
 % simulations:
-O.otr           = y_sim_tr(iTr,:)';
-O.ova           = y_sim_va(iTr,:)';
-O.ote           = y_sim_te(iTr,:)';
+O.otr           = y_sim_tr(iTr,:)';         %#ok<NODEF>
+O.ova           = y_sim_va(iTr,:)';         %#ok<NODEF>
+O.ote           = y_sim_te(iTr,1:Ites-1)';  
 % targets:
 T.ttr           = ttr';
 T.tva           = tva';
-T.tte           = tte';
+T.tte           = tte(1,1:Ites-1)';
+% extra - validation
+O.otes          = y_sim_te(iTr,Ites:end)';  %#ok<COLND>
+T.ttes          = tte(1,Ites:end)';         %#ok<COLND>
+    % This point is extremely important! In fact, the selection of the
+    % number of principal components is performed on the Validation subset
+    % (and this is not the point) and the GA optimization is based on the
+    % performance of the BAGAP ensemble on the Testing subset.
+    % In order to ensure that the final evaluation is carried out on an
+    % independent Testing subset, a "tes" subset is here built and it used
+    % in ga_pcr_fitness.m for the final evaluation.
 %% --- see
 % size of subsets
-fprintf(' DATA   [%4s,%4s]\n','rows','cols')
-fprintf('--------------------\n')
-fprintf(' otr    [%4d,%4d]\n',size(O.otr))
-fprintf(' ova    [%4d,%4d]\n',size(O.ova))
-fprintf(' ote    [%4d,%4d]\n',size(O.ote))
-fprintf(' ttr    [%4d,%4d]\n',size(T.ttr))
-fprintf(' tva    [%4d,%4d]\n',size(T.tva))
-fprintf(' tte    [%4d,%4d]\n',size(T.tte))
-fprintf('--------------------\n')
-fprintf('        [%4s,%4s]\n','repl','boot')
+% fprintf(' DATA   [%4s,%4s]\n','rows','cols')
+% fprintf('--------------------\n')
+% fprintf(' otr    [%4d,%4d]\n',size(O.otr))
+% fprintf(' ova    [%4d,%4d]\n',size(O.ova))
+% fprintf(' ote    [%4d,%4d]\n',size(O.ote))
+% fprintf(' ttr    [%4d,%4d]\n',size(T.ttr))
+% fprintf(' tva    [%4d,%4d]\n',size(T.tva))
+% fprintf(' tte    [%4d,%4d]\n',size(T.tte))
+% fprintf('--------------------\n')
+% fprintf('        [%4s,%4s]\n','repl','boot')
 %% Repeatability
 seedN = randi( [1,10^6], 1, 1 );
 rng( seedN, 'twister' )
@@ -117,9 +117,10 @@ ga_opt = optimoptions(ga_opt, ...
                         'PlotFcns',               PltFnc, ...
                         'PopulationSize',         popsize, ...
                         'MaxGenerations',         maxgen,...
-                        'MaxStallGenerations',    200,...
+                        'MaxStallGenerations',    50,...
                         'UseVectorized',          true,...
-                        'UseParallel',            false...
+                        'UseParallel',            false,...
+                        'FunctionTolerance',      fncTolle...
                       );
 %% -- run
 [x,fval,reason,output] = ga(FitnessFnc,nvars,[],[],[],[],[],[],[],ga_opt);
@@ -155,9 +156,10 @@ eFlags = {
    -5, 'Time limit exceeded.';
    };
 %% -- eval results
-pearson_r   = ga_pcr_fitness(x, 5, O, T);
-rmse        = ga_pcr_fitness(x, 2, O, T);
-eFlag_str   = eFlags( cell2mat(eFlags(:,1))==reason, 2 );
+[pearson_r,~,Otes] = ga_pcr_fitness(x, 5, O, T);
+[rmse,~,~]         = ga_pcr_fitness(x, 2, O, T);
+Ind_ttes           = perfind(T.ttes, Otes);
+eFlag_str          = eFlags( cell2mat(eFlags(:,1))==reason, 2 );
 %% -- print
 % PRINT ON SCREEN
 fprintf('%s\n',repmat('_',1,110))
@@ -167,10 +169,12 @@ fprintf('\n')
 % useSorting,(nBoots),nvars,popsize,maxgen,mutationRate,CrossFract,(FitnessPerf)
 fprintf('useSorting: %2d,  nvars: %3d,  popsize: %4d,  maxgen: %5d,  mutationRate: %.3f,  CrossFract: %.3f.\n', ...
         useSorting,nvars,popsize,maxgen,mutationRate,CrossFract)
-fprintf('r: %.3f,  rmse: %.3f.\n\n',pearson_r,rmse)
+fprintf('r( Te): %.3f,  rmse( Te): %.3f.\n',pearson_r,rmse)
+fprintf('r(eTe): %.3f,  rmse(eTe): %.3f.\n\n',Ind_ttes.r,Ind_ttes.rmse)
 
 % PRINT IN FILE:
-fid = fopen( fullfile(WDIR,'ga_runs_results.txt'),'a');
+[~,results,~]=fileparts(save_ga_fil);
+fid = fopen( fullfile(WDIR,'GA_sensitivity',[results,'.txt']),'a' );
 fprintf(fid,'%s\n',repmat('_',1,110));
 fprintf(fid,'Sorted iANN:\t');
 fprintf(fid,'%d,', sort(x{1})');
@@ -178,33 +182,37 @@ fprintf(fid,'\n');
 % useSorting,(nBoots),nvars,popsize,maxgen,mutationRate,CrossFract,(FitnessPerf)
 fprintf(fid,'useSorting: %2d,  nvars: %3d,  popsize: %4d,  maxgen: %5d,  mutationRate: %.3f,  CrossFract: %.3f.\n', ...
         useSorting,nvars,popsize,maxgen,mutationRate,CrossFract);
-fprintf(fid,'r: %.3f,  rmse: %.3f.\n\n',pearson_r,rmse);
+fprintf(fid,'r( Te): %.3f,  rmse( Te): %.3f.\n',pearson_r,rmse);
+fprintf(fid,'r(eTe): %.3f,  rmse(eTe): %.3f.\n\n',Ind_ttes.r,Ind_ttes.rmse);
 fclose(fid);
 %% -- save conditions
-GA.name              = name;
-GA.useSorting        = useSorting;
-GA.nBoots            = nBoots;
-GA.nvars             = nvars;
-GA.popsize           = popsize;
-GA.maxgen            = maxgen;
-GA.mutationRate      = mutationRate;
-GA.CrossFract        = CrossFract;
-GA.FitnessPerf       = FitnessPerf;
-GA.save_rng          = save_rng;
-GA.pearson_r         = pearson_r;
-GA.rmse              = rmse;
-GA.x                 = x;
-GA.fval              = fval;
-GA.reason            = reason;
-GA.eFlag_str         = eFlag_str;
-GA.output            = output;
-GA.ga_opt            = ga_opt;
-GA.BAGAP             = P;
+cGA.name              = selBAGAP;
+cGA.useSorting        = useSorting;
+cGA.nBoots            = nBoots;
+cGA.nvars             = nvars;
+cGA.popsize           = popsize;
+cGA.maxgen            = maxgen;
+cGA.mutationRate      = mutationRate;
+cGA.CrossFract        = CrossFract;
+cGA.FitnessPerf       = FitnessPerf;
+cGA.save_rng          = save_rng;
+cGA.pearson_r         = pearson_r;
+cGA.rmse              = rmse;
+cGA.x                 = x;
+cGA.fval              = fval;
+cGA.reason            = reason;
+cGA.eFlag_str         = eFlag_str;
+cGA.output            = output;
+cGA.ga_opt            = ga_opt;
+cGA.BAGAP             = P;
+cGA.iTr               = iTr;
+cGA.Otes              = Otes;% the BAGAP output on extra Testing subset
 
-if exist( fullfile(WDIR,save_ga_fil), 'file' )
-    load( fullfile(WDIR,save_ga_fil), 'GA' )
-    GA(end+1) = GA;
-    save( fullfile(WDIR,save_ga_fil), 'GA' )
+if exist( save_ga_fil, 'file' )
+    load( save_ga_fil, 'GA' )
+    GA(end+1) = cGA; %#ok<NASGU>
+    save( save_ga_fil, 'GA' )
 else
-    save( fullfile(WDIR,save_ga_fil), 'GA' )
+    GA = cGA; %#ok<NASGU>
+    save( save_ga_fil, 'GA' )
 end
